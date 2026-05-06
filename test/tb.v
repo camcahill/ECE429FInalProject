@@ -12,7 +12,16 @@ module tb;
     reg        clk;
     reg        rst_n;
 
+`ifdef GL_TEST
+    supply1 VPWR;
+    supply0 VGND;
+`endif
+
     tt_um_camcahill_analog_clock user_project (
+`ifdef GL_TEST
+        .VPWR(VPWR),
+        .VGND(VGND),
+`endif
         .ui_in(ui_in),
         .uo_out(uo_out),
         .uio_in(uio_in),
