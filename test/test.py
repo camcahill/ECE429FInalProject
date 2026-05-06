@@ -13,39 +13,53 @@ def controls(set_mode=0, inc_hour=0, inc_minute=0, pause=0, output_select=0):
     )
 
 
+def safe_int(signal_value):
+    value_string = str(signal_value).lower()
+    value_string = value_string.replace("x", "0")
+    value_string = value_string.replace("z", "0")
+    return int(value_string, 2)
+
+
 async def reset_dut(dut):
     dut.ena.value = 1
     dut.ui_in.value = controls(pause=1)
     dut.uio_in.value = 0
-    dut.rst_n.value = 0
 
+    dut.rst_n.value = 1
+    await Timer(10, unit="ns")
+
+    dut.rst_n.value = 0
     await ClockCycles(dut.clk, 5)
 
     dut.rst_n.value = 1
-    await Timer(1, unit="ns")
+    await ClockCycles(dut.clk, 2)
+    await Timer(20, unit="ns")
 
 
 async def read_seconds(dut):
     dut.ui_in.value = controls(pause=1, output_select=0)
-    await Timer(1, unit="ns")
-    return int(dut.uo_out.value) & 0x3F
+    await ClockCycles(dut.clk, 1)
+    await Timer(20, unit="ns")
+    return safe_int(dut.uo_out.value) & 0x3F
 
 
 async def read_minutes(dut):
     dut.ui_in.value = controls(pause=1, output_select=1)
-    await Timer(1, unit="ns")
-    return int(dut.uo_out.value) & 0x3F
+    await ClockCycles(dut.clk, 1)
+    await Timer(20, unit="ns")
+    return safe_int(dut.uo_out.value) & 0x3F
 
 
 async def read_hours(dut):
     dut.ui_in.value = controls(pause=1, output_select=2)
-    await Timer(1, unit="ns")
-    return int(dut.uo_out.value) & 0x0F
+    await ClockCycles(dut.clk, 1)
+    await Timer(20, unit="ns")
+    return safe_int(dut.uo_out.value) & 0x0F
 
 
 async def read_pm(dut):
-    await Timer(1, unit="ns")
-    return int(dut.uio_out.value) & 0x01
+    await Timer(20, unit="ns")
+    return safe_int(dut.uio_out.value) & 0x01
 
 
 async def pulse_hour(dut):
@@ -66,7 +80,8 @@ async def run_clock_cycles(dut, cycles):
     dut.ui_in.value = controls(pause=0, output_select=0)
     await ClockCycles(dut.clk, cycles)
     dut.ui_in.value = controls(pause=1, output_select=0)
-    await Timer(1, unit="ns")
+    await ClockCycles(dut.clk, 1)
+    await Timer(20, unit="ns")
 
 
 @cocotb.test()
@@ -89,7 +104,6 @@ async def test_set_mode_and_run(dut):
 
     await reset_dut(dut)
 
-    # Enter set mode and set time to 2:03:00 AM
     dut.ui_in.value = controls(set_mode=1, pause=1)
 
     await pulse_hour(dut)
@@ -104,7 +118,6 @@ async def test_set_mode_and_run(dut):
     assert await read_seconds(dut) == 0
     assert await read_pm(dut) == 0
 
-    # Run for 5 seconds
     await run_clock_cycles(dut, 5)
 
     assert await read_hours(dut) == 2
@@ -122,7 +135,6 @@ async def test_pause(dut):
     await run_clock_cycles(dut, 5)
     assert await read_seconds(dut) == 5
 
-    # Stay paused for 5 cycles
     dut.ui_in.value = controls(pause=1)
     await ClockCycles(dut.clk, 5)
 
@@ -136,10 +148,8 @@ async def test_rollover_and_am_pm(dut):
 
     await reset_dut(dut)
 
-    # Set time to 11:59:00 AM
     dut.ui_in.value = controls(set_mode=1, pause=1)
 
-    # Reset starts at 12, so 11 pulses reaches 11
     for _ in range(11):
         await pulse_hour(dut)
 
@@ -151,7 +161,6 @@ async def test_rollover_and_am_pm(dut):
     assert await read_seconds(dut) == 0
     assert await read_pm(dut) == 0
 
-    # Run 60 seconds: 11:59:00 AM -> 12:00:00 PM
     await run_clock_cycles(dut, 60)
 
     assert await read_hours(dut) == 12
