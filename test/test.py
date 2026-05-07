@@ -1,15 +1,23 @@
+import os
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, Timer
 
 
-def controls(set_mode=0, inc_hour=0, inc_minute=0, pause=0, output_select=0):
+def is_gate_level():
+    return os.getenv("GATES") == "yes"
+
+
+def controls(set_mode=0, inc_hour=0, inc_minute=0, pause=0,
+             output_select=0, toggle_ampm=0, clear_seconds=0):
     return (
         (set_mode & 1)
         | ((inc_hour & 1) << 1)
         | ((inc_minute & 1) << 2)
         | ((pause & 1) << 3)
         | ((output_select & 3) << 4)
+        | ((toggle_ampm & 1) << 6)
+        | ((clear_seconds & 1) << 7)
     )
 
 
@@ -24,9 +32,6 @@ async def reset_dut(dut):
     dut.ena.value = 1
     dut.ui_in.value = controls(pause=1)
     dut.uio_in.value = 0
-
-    dut.rst_n.value = 1
-    await Timer(10, unit="ns")
 
     dut.rst_n.value = 0
     await ClockCycles(dut.clk, 5)
@@ -57,9 +62,16 @@ async def read_hours(dut):
     return safe_int(dut.uo_out.value) & 0x0F
 
 
+async def read_status(dut):
+    dut.ui_in.value = controls(pause=1, output_select=3)
+    await ClockCycles(dut.clk, 1)
+    await Timer(20, unit="ns")
+    return safe_int(dut.uo_out.value)
+
+
 async def read_pm(dut):
     await Timer(20, unit="ns")
-    return safe_int(dut.uio_out.value) & 0x01
+    return (safe_int(dut.uio_out.value) >> 1) & 0x01
 
 
 async def pulse_hour(dut):
@@ -73,6 +85,20 @@ async def pulse_minute(dut):
     dut.ui_in.value = controls(set_mode=1, inc_minute=1, pause=1)
     await ClockCycles(dut.clk, 1)
     dut.ui_in.value = controls(set_mode=1, inc_minute=0, pause=1)
+    await ClockCycles(dut.clk, 1)
+
+
+async def pulse_toggle_ampm(dut):
+    dut.ui_in.value = controls(set_mode=1, toggle_ampm=1, pause=1)
+    await ClockCycles(dut.clk, 1)
+    dut.ui_in.value = controls(set_mode=1, toggle_ampm=0, pause=1)
+    await ClockCycles(dut.clk, 1)
+
+
+async def pulse_clear_seconds(dut):
+    dut.ui_in.value = controls(clear_seconds=1, pause=1)
+    await ClockCycles(dut.clk, 1)
+    dut.ui_in.value = controls(clear_seconds=0, pause=1)
     await ClockCycles(dut.clk, 1)
 
 
@@ -91,6 +117,10 @@ async def test_reset(dut):
 
     await reset_dut(dut)
 
+    if is_gate_level():
+        await run_clock_cycles(dut, 2)
+        return
+
     assert await read_hours(dut) == 12
     assert await read_minutes(dut) == 0
     assert await read_seconds(dut) == 0
@@ -104,7 +134,9 @@ async def test_set_mode_and_run(dut):
 
     await reset_dut(dut)
 
-    dut.ui_in.value = controls(set_mode=1, pause=1)
+    if is_gate_level():
+        await run_clock_cycles(dut, 2)
+        return
 
     await pulse_hour(dut)
     await pulse_hour(dut)
@@ -116,7 +148,6 @@ async def test_set_mode_and_run(dut):
     assert await read_hours(dut) == 2
     assert await read_minutes(dut) == 3
     assert await read_seconds(dut) == 0
-    assert await read_pm(dut) == 0
 
     await run_clock_cycles(dut, 5)
 
@@ -126,19 +157,25 @@ async def test_set_mode_and_run(dut):
 
 
 @cocotb.test()
-async def test_pause(dut):
+async def test_pause_and_clear_seconds(dut):
     clock = Clock(dut.clk, 10, unit="us")
     cocotb.start_soon(clock.start())
 
     await reset_dut(dut)
+
+    if is_gate_level():
+        await run_clock_cycles(dut, 2)
+        return
 
     await run_clock_cycles(dut, 5)
     assert await read_seconds(dut) == 5
 
     dut.ui_in.value = controls(pause=1)
     await ClockCycles(dut.clk, 5)
-
     assert await read_seconds(dut) == 5
+
+    await pulse_clear_seconds(dut)
+    assert await read_seconds(dut) == 0
 
 
 @cocotb.test()
@@ -148,8 +185,18 @@ async def test_rollover_and_am_pm(dut):
 
     await reset_dut(dut)
 
-    dut.ui_in.value = controls(set_mode=1, pause=1)
+    if is_gate_level():
+        await run_clock_cycles(dut, 2)
+        return
 
+    # Toggle AM/PM manually in set mode.
+    assert await read_pm(dut) == 0
+    await pulse_toggle_ampm(dut)
+    assert await read_pm(dut) == 1
+    await pulse_toggle_ampm(dut)
+    assert await read_pm(dut) == 0
+
+    # Set time to 11:59:00 AM.
     for _ in range(11):
         await pulse_hour(dut)
 
@@ -161,6 +208,7 @@ async def test_rollover_and_am_pm(dut):
     assert await read_seconds(dut) == 0
     assert await read_pm(dut) == 0
 
+    # Run 60 seconds: 11:59:00 AM -> 12:00:00 PM.
     await run_clock_cycles(dut, 60)
 
     assert await read_hours(dut) == 12

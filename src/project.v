@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2024 Cameron Cahill
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 `default_nettype none
 
 module tt_um_camcahill_analog_clock (
@@ -11,57 +16,60 @@ module tt_um_camcahill_analog_clock (
     input  wire       rst_n
 );
 
-    wire rst;
-    assign rst = ~rst_n;
-
-    // Control inputs
+    // All 8 input pins are used.
     wire set_mode;
     wire inc_hour;
     wire inc_minute;
     wire pause_clock;
-
-    assign set_mode    = ui_in[0];
-    assign inc_hour    = ui_in[1];
-    assign inc_minute  = ui_in[2];
-    assign pause_clock = ui_in[3];
-
-    // Output select:
-    // 00 = seconds
-    // 01 = minutes
-    // 10 = hours
-    // 11 = status
     wire [1:0] output_select;
-    assign output_select = ui_in[5:4];
+    wire toggle_ampm;
+    wire clear_seconds;
 
-    // Time registers
+    assign set_mode      = ui_in[0];
+    assign inc_hour      = ui_in[1];
+    assign inc_minute    = ui_in[2];
+    assign pause_clock   = ui_in[3];
+    assign output_select = ui_in[5:4];
+    assign toggle_ampm   = ui_in[6];
+    assign clear_seconds = ui_in[7];
+
+    // Clock registers
     reg [5:0] seconds;     // 0 to 59
     reg [5:0] minutes;     // 0 to 59
     reg [3:0] hours;       // 1 to 12
     reg       pm;          // 0 = AM, 1 = PM
 
-    // Edge detection for button-like inputs
+    // Edge detection registers
     reg prev_inc_hour;
     reg prev_inc_minute;
+    reg prev_toggle_ampm;
 
     wire inc_hour_pulse;
     wire inc_minute_pulse;
+    wire toggle_ampm_pulse;
 
-    assign inc_hour_pulse   = inc_hour   & ~prev_inc_hour;
-    assign inc_minute_pulse = inc_minute & ~prev_inc_minute;
+    assign inc_hour_pulse    = inc_hour    & ~prev_inc_hour;
+    assign inc_minute_pulse  = inc_minute  & ~prev_inc_minute;
+    assign toggle_ampm_pulse = toggle_ampm & ~prev_toggle_ampm;
 
-    always @(posedge clk or posedge rst) begin
-        if (rst) begin
-            seconds         <= 6'd0;
-            minutes         <= 6'd0;
-            hours           <= 4'd12;
-            pm              <= 1'b0;     // reset to 12:00:00 AM
-            prev_inc_hour   <= 1'b0;
-            prev_inc_minute <= 1'b0;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            seconds          <= 6'd0;
+            minutes          <= 6'd0;
+            hours            <= 4'd12;
+            pm               <= 1'b0;
+
+            prev_inc_hour    <= 1'b0;
+            prev_inc_minute  <= 1'b0;
+            prev_toggle_ampm <= 1'b0;
         end else begin
-            prev_inc_hour   <= inc_hour;
-            prev_inc_minute <= inc_minute;
+            prev_inc_hour    <= inc_hour;
+            prev_inc_minute  <= inc_minute;
+            prev_toggle_ampm <= toggle_ampm;
 
-            if (set_mode) begin
+            if (clear_seconds) begin
+                seconds <= 6'd0;
+            end else if (set_mode) begin
                 seconds <= 6'd0;
 
                 if (inc_hour_pulse) begin
@@ -80,6 +88,10 @@ module tt_um_camcahill_analog_clock (
                         minutes <= 6'd0;
                     else
                         minutes <= minutes + 6'd1;
+                end
+
+                if (toggle_ampm_pulse) begin
+                    pm <= ~pm;
                 end
             end else if (!pause_clock) begin
                 if (seconds == 6'd59) begin
@@ -106,7 +118,21 @@ module tt_um_camcahill_analog_clock (
         end
     end
 
-    // Output mux
+    // Status output uses all 8 bidirectional output pins.
+    wire [7:0] status_output;
+
+    assign status_output = {
+        clear_seconds,
+        toggle_ampm,
+        inc_minute,
+        inc_hour,
+        pause_clock,
+        set_mode,
+        pm,
+        1'b1
+    };
+
+    // Main 8-bit output bus uses all 8 dedicated output pins.
     reg [7:0] selected_output;
 
     always @* begin
@@ -114,22 +140,16 @@ module tt_um_camcahill_analog_clock (
             2'b00: selected_output = {2'b00, seconds};
             2'b01: selected_output = {2'b00, minutes};
             2'b10: selected_output = {4'b0000, hours};
-            2'b11: selected_output = {4'b0000, pause_clock, set_mode, pm, 1'b1};
-            default: selected_output = 8'b0;
+            2'b11: selected_output = status_output;
+            default: selected_output = 8'b00000000;
         endcase
     end
 
-    assign uo_out = selected_output;
+    assign uo_out  = selected_output;
+    assign uio_out = status_output;
+    assign uio_oe  = 8'hFF;
 
-    // Status outputs
-    assign uio_out[0] = pm;          // 0 = AM, 1 = PM
-    assign uio_out[1] = set_mode;
-    assign uio_out[2] = pause_clock;
-    assign uio_out[7:3] = 5'b00000;
-
-    assign uio_oe = 8'hFF;
-
-    wire _unused;
-    assign _unused = &{ena, uio_in, ui_in[7:6], 1'b0};
+    // Prevent unused warning for TinyTapeout pins not used as logic inputs.
+    wire _unused = &{ena, uio_in, 1'b0};
 
 endmodule

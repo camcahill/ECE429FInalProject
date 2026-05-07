@@ -3,7 +3,7 @@ project:
   title: "Analog Clock Controller"
   author: "Cameron Cahill"
   discord: "IsopteraCrwl"
-  description: "A digital analog clock controller that tracks seconds, minutes, hours, and AM/PM status using a TinyTapeout pin interface."
+  description: "A digital analog clock controller that tracks seconds, minutes, hours, and AM/PM status using all 8 TinyTapeout input pins and all 8 output pins."
   language: "Verilog"
   clock_hz: 1
   tiles: "1x1"
@@ -13,7 +13,7 @@ project:
   source_files:
     - "project.v"
 
-# The pinout of your project. Leave unused pins blank.
+# The pinout of your project.
 pinout:
   # Inputs
   ui[0]: "Set mode"
@@ -22,8 +22,8 @@ pinout:
   ui[3]: "Pause clock"
   ui[4]: "Output select bit 0"
   ui[5]: "Output select bit 1"
-  ui[6]: ""
-  ui[7]: ""
+  ui[6]: "Toggle AM/PM"
+  ui[7]: "Clear seconds"
 
   # Outputs
   uo[0]: "Selected output bit 0"
@@ -35,15 +35,15 @@ pinout:
   uo[6]: "Selected output bit 6"
   uo[7]: "Selected output bit 7"
 
-  # Bidirectional pins
-  uio[0]: "AM/PM status output"
-  uio[1]: "Set mode status output"
-  uio[2]: "Pause status output"
-  uio[3]: ""
-  uio[4]: ""
-  uio[5]: ""
-  uio[6]: ""
-  uio[7]: ""
+  # Bidirectional pins used as outputs
+  uio[0]: "Valid/status bit"
+  uio[1]: "AM/PM status"
+  uio[2]: "Set mode status"
+  uio[3]: "Pause status"
+  uio[4]: "Increment hour status"
+  uio[5]: "Increment minute status"
+  uio[6]: "Toggle AM/PM status"
+  uio[7]: "Clear seconds status"
 
 # Do not change!
 yaml_version: 6
